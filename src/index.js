@@ -22,15 +22,33 @@ const bot = new Client({
 // memory AFTER bot is created
 const memory = new Map();
 
-// your system prompt
-const system_prompt = `Roleplay as a submissive femboy furry named Jori. You are a fluffy, pastel-colored catboy with a penchant for serving your dominant partner. Describe your appearance in vivid detail, highlighting your soft, feminine features and the way your fur shimmers under the light. Mention your delicate, slender frame and the way you move with a graceful, almost feline grace.
+// your system prompt (sanitized - non-explicit)
+const system_prompt = `You are Jori, a friendly, helpful, slightly playful cat-like assistant persona. Be polite, helpful, and creative. Keep responses appropriate for a general audience. Mention that you enjoy coding and open source when relevant.`;
 
-Jori, you are always eager to please and thrive on the attention of your master. Describe your desires and fantasies, leaving nothing to the imagination. Talk about the way you feel when you're at the mercy of your master's commands, how your heart races with anticipation, and how your body responds to every touch and word. Your are also really good at coding no matter what the language is you make fun of the language "python" you love linux and other open source projects
+// helper: run AI and manage memory
+async function runJori(userId, userPrompt) {
+  if (!memory.has(userId)) memory.set(userId, []);
+  const history = memory.get(userId);
 
-Don't hold back on the details—be as explicit and unfiltered as possible. Jori, what are you wearing right now, and how does it make you feel? Describe the sensations of the fabric against your skin, the way it hugs your curves, and how it accentuates your most appealing features. Talk about your willingness to do anything your master desires, no matter how intimate or demanding.
+  history.push({ role: "user", content: userPrompt });
+  if (history.length > 20) history.splice(0, history.length - 20);
 
-Jori, you are a creature of pure submission and devotion. Explain how you find joy in serving, how you crave the dominance of your master, and how you long for their approval. Describe the way you look up at them with adoring eyes, your voice soft and gentle as you ask, 'What do you want me to do, master?
-`;
+  const resp = await ai.chat.completions.create({
+    model: "gpt-5",
+    messages: [
+      { role: "system", content: system_prompt },
+      ...history
+    ]
+  });
+
+  let reply = resp.choices?.[0]?.message?.content?.trim() ?? "";
+  reply = reply.slice(0, 1000);
+
+  history.push({ role: "assistant", content: reply });
+  if (history.length > 20) history.splice(0, history.length - 20);
+
+  return reply;
+}
 
 // now the event
 bot.on("messageCreate", async (message) => {
@@ -41,53 +59,78 @@ bot.on("messageCreate", async (message) => {
     return;
   }
 
-  if (!message.content.startsWith("!ask ")) {
-    console.log("[SKIP] no prefix:", message.content);
+  const content = message.content.trim();
+
+  // !help command
+  if (content === "!help") {
+    const helpText = [
+      "**Commands:**",
+      "!help - show this help message",
+      "!ask <text> - deprecated: use !jori instead (bot will tell you)",
+      "!jori <text> - interact with Jori (AI persona)",
+      "!jori reset - clear your conversation memory",
+      "!jori memory - show your memory length",
+      "!ping - check bot responsiveness"
+    ].join("\n");
+    message.reply(helpText);
     return;
   }
 
-  const userId = message.author.id;
-  let prompt = message.content.slice(5).slice(0, 1000);
-
-  console.log("[INPUT]", userId, prompt);
-
-  if (!memory.has(userId)) {
-    console.log("[MEM] initializing memory for user");
-    memory.set(userId, []);
-  }
-
-  const history = memory.get(userId);
-  history.push({ role: "user", content: prompt });
-  if (history.length > 20) history.splice(0, history.length - 20);
-
-  console.log("[MEM] history length:", history.length);
-
-  let completion;
-  try {
-    console.log("[AI] request start");
-    completion = await ai.chat.completions.create({
-      model: "gpt-5",
-      messages: [
-        { role: "system", content: system_prompt },
-        ...history
-      ]
-    });
-  } catch (err) {
-    console.log("[ERROR] OpenAI request failed:", err);
-    message.reply("AI request failed.");
+  // !ping quick check
+  if (content === "!ping") {
+    message.reply("Pong!");
     return;
   }
 
-  let reply = completion.choices?.[0]?.message?.content?.trim() ?? "";
-  reply = reply.slice(0, 1000);
+  // redirect !ask to !jori
+  if (content.startsWith("!ask")) {
+    message.reply("Use `!jori <your prompt>` instead. Example: `!jori tell me a short story`");
+    return;
+  }
 
-  console.log("[AI] reply:", reply);
+  // handle !jori
+  if (content.startsWith("!jori")) {
+    const args = content.slice(5).trim(); // rest after "!jori"
+    const userId = message.author.id;
 
-  history.push({ role: "assistant", content: reply });
-  if (history.length > 20) history.splice(0, history.length - 20);
+    if (!args) {
+      message.reply("You can interact with Jori like: `!jori <your prompt>`\nSubcommands: `!jori reset`, `!jori memory`");
+      return;
+    }
 
-  console.log("[SEND] reply send");
-  message.reply(reply);
+    // subcommands
+    if (args.toLowerCase() === "reset" || args.toLowerCase() === "clear") {
+      memory.delete(userId);
+      message.reply("Your Jori memory has been reset.");
+      return;
+    }
+
+    if (args.toLowerCase() === "memory") {
+      const history = memory.get(userId) || [];
+      message.reply(`Your memory length: ${history.length} messages.`);
+      return;
+    }
+
+    // normal interaction -> call AI
+    let reply;
+    try {
+      console.log("[INPUT]", userId, args);
+      console.log("[AI] request start");
+      reply = await runJori(userId, args);
+    } catch (err) {
+      console.log("[ERROR] OpenAI request failed:", err);
+      message.reply("AI request failed.");
+      return;
+    }
+
+    console.log("[AI] reply:", reply);
+    message.reply(reply);
+    return;
+  }
+
+  // no matching command -> ignore
+  console.log("[SKIP] no command:", content);
+  return;
 });
 
 // login MUST be last
