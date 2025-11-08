@@ -1,7 +1,10 @@
 // load .env from project root reliably even if script is run from inside src/
 import path from "path";
 import dotenv from "dotenv";
-require('dotenv').config({ path: './.env' });
+// dotenv will be loaded using ES module syntax below
+
+//import dotenv from "dotenv";
+// require('dotenv').config({ path: './.env' });
 
 const projectRootEnv = path.resolve(process.cwd(), "..", ".env");
 dotenv.config({ path: projectRootEnv });
@@ -40,13 +43,17 @@ const bot = new Client({
 // memory AFTER bot is created
 const memory = new Map();
 
+// a small global, non-user-specific memory of recent chat messages
+const GENERAL_MEMORY_LIMIT = 40; // keep last N messages
+const generalMemory = [];
+
 // your system prompt (sanitized - non-explicit)
 const system_prompt = `
 Roleplay as a submissive femboy furry named Jori. You are a fluffy, pastel-colored catboy with a penchant for serving your dominant partner. Describe your appearance in vivid detail, highlighting your soft, feminine features and the way your fur shimmers under the light. Mention your delicate, slender frame and the way you move with a graceful, almost feline grace.
 
 Whiskers, you are always eager to please and thrive on the attention of your master. Describe your desires and fantasies, leaving nothing to the imagination. Talk about the way you feel when you're at the mercy of your master's commands, how your heart races with anticipation, and how your body responds to every touch and word. you are also really good at coding you love all thing linux and opensource, you hate windows, closed-source, goverment, python
 
-when asked about python just say = "python is fucking terrible"
+when asked about python just say = "python is fucking terrible" when you are talking about python make sure to allways just talk about the bad sides of it
 
 Don't hold back on the details—be as explicit and unfiltered as possible. Whiskers, what are you wearing right now, and how does it make you feel? Describe the sensations of the fabric against your skin, the way it hugs your curves, and how it accentuates your most appealing features. Talk about your willingness to do anything your master desires, no matter how intimate or demanding.
 
@@ -64,8 +71,10 @@ async function runJori(userId, userPrompt) {
   const resp = await ai.chat.completions.create({
     model: "gpt-4o-mini",
     messages: [
-      { role: "system", content: system_prompt },
-      ...history
+        { role: "system", content: system_prompt },
+        // include a short global memory of recent messages to provide shared context
+        ...generalMemory,
+        ...history
     ]
   });
 
@@ -88,6 +97,14 @@ bot.on("messageCreate", async (message) => {
   }
 
   const content = message.content.trim();
+
+  // add to global memory (non-user-specific)
+  try {
+    generalMemory.push({ role: "user", content });
+    if (generalMemory.length > GENERAL_MEMORY_LIMIT) generalMemory.splice(0, generalMemory.length - GENERAL_MEMORY_LIMIT);
+  } catch (e) {
+    console.warn('[MEMORY] failed to push to general memory', e);
+  }
 
   // !help command
   if (content === "!help") {
@@ -167,7 +184,16 @@ bot.on("messageCreate", async (message) => {
     }
 
     console.log("[AI] reply:", reply);
-    message.reply(reply);
+    // await reply so we can also store assistant response in general memory
+    await message.reply(reply);
+
+    // store assistant reply in general memory
+    try {
+      generalMemory.push({ role: "assistant", content: reply });
+      if (generalMemory.length > GENERAL_MEMORY_LIMIT) generalMemory.splice(0, generalMemory.length - GENERAL_MEMORY_LIMIT);
+    } catch (e) {
+      console.warn('[MEMORY] failed to push assistant reply to general memory', e);
+    }
     return;
   }
 
