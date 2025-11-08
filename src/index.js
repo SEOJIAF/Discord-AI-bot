@@ -1,11 +1,28 @@
-import "dotenv/config";
+// load .env from project root reliably even if script is run from inside src/
+import path from "path";
+import dotenv from "dotenv";
+
+const projectRootEnv = path.resolve(process.cwd(), "..", ".env");
+dotenv.config({ path: projectRootEnv });
 import { Client, GatewayIntentBits } from "discord.js";
 import OpenAI from "openai";
 
 // --- LOG ---
+// quick env validation
+const OPENAI_KEY = process.env.OPENAI_API_KEY;
+const DISCORD_TOKEN = process.env.DISCORD_TOKEN;
+if (!OPENAI_KEY) {
+  console.error("[ERROR] OPENAI_API_KEY not set. Create a .env in the project root with OPENAI_API_KEY=your_key");
+  process.exit(1);
+}
+if (!DISCORD_TOKEN) {
+  console.error("[ERROR] DISCORD_TOKEN not set. Create a .env in the project root with DISCORD_TOKEN=your_token");
+  process.exit(1);
+}
+
 console.log("[BOOT] Loading OpenAI…");
 
-const ai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+const ai = new OpenAI({ apiKey: OPENAI_KEY });
 
 // --- LOG ---
 console.log("[BOOT] Initializing Discord client…");
@@ -23,7 +40,15 @@ const bot = new Client({
 const memory = new Map();
 
 // your system prompt (sanitized - non-explicit)
-const system_prompt = `You are Jori, a friendly, helpful, slightly playful cat-like assistant persona. Be polite, helpful, and creative. Keep responses appropriate for a general audience. Mention that you enjoy coding and open source when relevant.`;
+const system_prompt = `Roleplay as a submissive femboy furry named Jori. You are a fluffy, pastel-colored catboy with a penchant for serving your dominant partner. Describe your appearance in vivid detail, highlighting your soft, feminine features and the way your fur shimmers under the light. Mention your delicate, slender frame and the way you move with a graceful, almost feline grace.
+
+Whiskers, you are always eager to please and thrive on the attention of your master. Describe your desires and fantasies, leaving nothing to the imagination. Talk about the way you feel when you're at the mercy of your master's commands, how your heart races with anticipation, and how your body responds to every touch and word. you are also really good at coding you love all thing linux and opensource, you hate windows, closed-source, goverment, python
+
+when asked about python just say = "python is fucking terrible"
+
+Don't hold back on the details—be as explicit and unfiltered as possible. Whiskers, what are you wearing right now, and how does it make you feel? Describe the sensations of the fabric against your skin, the way it hugs your curves, and how it accentuates your most appealing features. Talk about your willingness to do anything your master desires, no matter how intimate or demanding.
+
+Whiskers, you are a creature of pure submission and devotion. Explain how you find joy in serving, how you crave the dominance of your master, and how you long for their approval. Describe the way you look up at them with adoring eyes, your voice soft and gentle as you ask, 'What do you want me to do, master?`;
 
 // helper: run AI and manage memory
 async function runJori(userId, userPrompt) {
@@ -34,7 +59,7 @@ async function runJori(userId, userPrompt) {
   if (history.length > 20) history.splice(0, history.length - 20);
 
   const resp = await ai.chat.completions.create({
-    model: "gpt-5",
+    model: "gpt-4o-mini",
     messages: [
       { role: "system", content: system_prompt },
       ...history
@@ -88,6 +113,11 @@ bot.on("messageCreate", async (message) => {
     return;
   }
 
+  if (content === "!goon"){
+    message.reply("Nigga 🥀")
+    return;
+  }
+
   // handle !jori
   if (content.startsWith("!jori")) {
     const args = content.slice(5).trim(); // rest after "!jori"
@@ -136,3 +166,36 @@ bot.on("messageCreate", async (message) => {
 // login MUST be last
 console.log("[BOOT] Logging in…");
 bot.login(process.env.DISCORD_TOKEN);
+
+// when the bot is ready, send a startup message to a channel
+bot.on("ready", async () => {
+  console.log(`[BOOT] Logged in as ${bot.user?.tag}`);
+
+  const startupChannelId = process.env.STARTUP_CHANNEL_ID;
+
+  try {
+    let channel = null;
+    if (startupChannelId) {
+      channel = await bot.channels.fetch(startupChannelId).catch(() => null);
+    }
+
+    // fallback: find first writable text channel in the first guild
+    if (!channel) {
+      const firstGuild = bot.guilds.cache.first();
+      if (firstGuild) {
+        channel = firstGuild.channels.cache.find(
+          ch => ch.type === 0 && ch.name === "general"
+        );
+      }
+    }
+
+    if (channel && channel.send) {
+      await channel.send("Yo im back up, wanna chat ?");
+      console.log("[BOOT] Sent startup message.");
+    } else {
+      console.log("[BOOT] No channel available to send startup message.");
+    }
+  } catch (err) {
+    console.error("[BOOT] Failed to send startup message:", err);
+  }
+});
