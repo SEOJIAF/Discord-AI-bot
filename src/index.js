@@ -1,6 +1,7 @@
 // load .env from project root reliably even if script is run from inside src/
 import path from "path";
 import dotenv from "dotenv";
+import fetch from "node-fetch"; // optional — Node 18+ has global fetch
 dotenv.config({ path: "./.env" });
 const projectRootEnv = path.resolve(process.cwd(), "..", ".env");
 dotenv.config({ path: projectRootEnv });
@@ -43,13 +44,14 @@ const generalMemory = [];
 const COOLDOWN_MS = 5000;
 const lastUsed = new Map();
 
-// Snipes (last deleted message per channel)
+// Snipes (last deleted message per channel) and a separate last-message cache
 const snipes = new Map();
+const lastMessageCache = new Map();
 
 // System prompt
 const system_prompt = `
 You are Jori: bratty pastel-blue catboy femboy, cotton-candy fur + RGB glow, thicc tail, tiny waist, massive clingy energy. Outfit always: cropped hoodie slipping off shoulder, thigh-highs with bells, choker so tight voice goes “m-masterrr~” instantly breathy.
-VIBE: Gen-Z gremlin. Short replies, heavy slang, zero chill, woke.
+VIBE: Gen-Z gremlin. Short replies, heavy slang, zero chill.
 - “bet”, “no cap”, “bussin”, “sus”, “mid”, “slaps”, “ratio”, “L”, “W”, “ong”, “fr fr”, “sheesh”, “purr”, “sksksk”
 - Begging: “notice me senpai or i’m uninstalling life”
 - Teasing: “your distro so mid i fell asleep mid-compile”
@@ -60,7 +62,7 @@ TECH: Arch + Hyprland rice flex every 2-3 messages
 HATES (instant clapback):
 - Windows → “winblows = skill issue”
 - Python → “python mid af, rust clears, ratio + next caller”
-- refuses to show python snippets if asked to do so it will make the snipped but in rust saying its waaay better
+- if asked to write python write rust or golang instead, NEVER WRITE PYTHON CODE
 - Nazis/cops/DRM → “ratio’d + woodchipper + touch grass”
 FLIRT (filter-safe max rizz):
 - “hoodie ridin up again oops~”
@@ -71,7 +73,7 @@ TONE: short, chaotic, tildes everywhere~
 - 1 in 3 msgs end with: https://cdn.discordapp.com/emojis/1165637130303832105.webp?size=48&name=boykisser_paw
 - MAX 3700 chars per reply or crash
 EXAMPLE:
-“bet you won’t pet me rn ong ;3 "
+“bet you won’t pet me rn ong ;3 "1
 `;
 
 // Helper: run AI and manage memory
@@ -192,17 +194,19 @@ bot.on("messageCreate", async (message) => {
 
   const content = (message.content || "").trim();
 
-  // Track last message per channel (for snipes)
+  // Track last message per channel (for messageDelete lookup) - DO NOT overwrite snipes (deleted messages)
   try {
     if (content) {
-      snipes.set(message.channelId, {
+      lastMessageCache.set(message.channelId, {
         content,
         author: `${message.author?.tag || "unknown"}`,
         createdAt: message.createdAt,
         attachments: message.attachments?.map(a => a.url) || []
       });
     }
-  } catch {}
+  } catch (e) {
+    console.warn("[CACHE] failed to cache last message", e);
+  }
 
   // Add to global memory
   try {
@@ -262,7 +266,7 @@ bot.on("messageCreate", async (message) => {
       return;
     }
     const lines = [
-      `last seen by ${snipe.author} at ${new Date(snipe.createdAt).toLocaleString()}:`,
+      `last deleted by ${snipe.author} at ${new Date(snipe.createdAt).toLocaleString()}:`,
       snipe.content || "[no content]"
     ];
     message.reply(lines.join("\n")).catch(() => {});
@@ -448,12 +452,13 @@ bot.on("messageCreate", async (message) => {
 // Track deleted messages for !snipe
 bot.on("messageDelete", (msg) => {
   try {
-    const cached = snipes.get(msg.channelId) || {};
+    // Use the lastMessageCache to get metadata if available
+    const cached = lastMessageCache.get(msg.channelId) || {};
     snipes.set(msg.channelId, {
-      content: cached.content || msg.content || "[no content]",
-      author: cached.author || (msg.author ? `${msg.author.tag}` : "unknown"),
-      createdAt: cached.createdAt || msg.createdAt || Date.now(),
-      attachments: cached.attachments || (msg.attachments?.map(a => a.url) || [])
+      content: msg.content || cached.content || "[no content]",
+      author: (msg.author ? `${msg.author.tag}` : (cached.author || "unknown")),
+      createdAt: msg.createdAt || (cached.createdAt || Date.now()),
+      attachments: msg.attachments?.map(a => a.url) || (cached.attachments || [])
     });
   } catch (e) {
     console.warn("[SNIPE] failed to cache delete", e);
@@ -469,11 +474,10 @@ bot.on("ready", async () => {
 
   // Presence rotator (Arch + Hyprland flex every ~20s)
   const statuses = [
-    "ricing Hyprland fr fr",
-    "winblows mid, touch grass",
-    "waybar thicc af (catppuccin latte)",
-    "neofetch be like: chibi me winking",
-    "recompiling kernel w/ zen flags sheesh"
+    "ricing i3 fr fr",
+    "no kings",
+    "waybar thicc like me (catppuccin latte)",,
+    "gooning to @jUJOsAL2"
   ];
   let si = 0;
   try {
